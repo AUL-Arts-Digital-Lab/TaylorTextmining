@@ -1,0 +1,240 @@
+---
+title: "Taylor & Text-mining"
+output: html_document
+date: "2024-04-03"
+--- 
+This document consists of the coding part of the workshop "Text mining & Taylor" from AU Library at the Royal Danish Library. The workshop is about text mining all of Taylor Swifts songs. When text mining the primary interest is pulling information out of large amounts of text - which is the exact interest of many humanists.
+
+The workshop will both cover text mining, data visualization and sentiment analysis. 
+
+Instead of making our own dataset, containing the necessary information about the songs of Taylor Swift, we will use the "taylor" package in R made by Jake W. Thompson. The package is described as:
+
+"A comprehensive resource for data on Taylor Swift songs. Data is included for all officially released studio albums, extended plays (EPs), and individual singles are included. Data comes from 'Genius' (lyrics) and 'Spotify' (song characteristics). Additional functions are included for easily creating data visualizations with color palettes inspired by Taylor Swift's album covers" (https://cran.r-project.org/web/packages/taylor/index.html)
+
+Thompson W (2023). taylor: Lyrics and Song Data for Taylor Swift's Discography. R package version 3.0.0, https://github.com/wjakethompson/taylor, https://taylor.wjakethompson.com.
+
+
+
+# Installing the libraries 
+To make sure we have the right functions at hand we import these libraries
+```{r}
+library(taylor)
+library(ggplot2)
+library(tidyr)
+library(tidytext)
+library(textdata) 
+library(ggwordcloud)
+library(dplyr)
+library(SentimentAnalysis)
+library(tm)
+```
+
+
+#Importing data
+```{r}
+data("taylor_album_songs")
+```
+
+```{r}
+data("taylor_albums")
+```
+
+```{r}
+data("taylor_all_songs")
+```
+
+
+## Counting featured artists 
+One thing we might want to know is which artists Swift has made songs with, and how many times?
+We use the `count()` function to do this: 
+
+```{r}
+taylor_album_songs %>% 
+  count(featuring, sort = TRUE)
+```
+
+
+## Ranking by metacritic score
+It would also be interesting to see which album has the hightest "metacritc score", in order to see which album might be the best one. We use the `arrange()` and `select()` function to do this, and instead of using the 'taylor_album_songs' dataset we will use the 'taylor_albums' dataset. Furthermore, we use a %>% (pipe) to chain muliple functions togehter.
+
+```{r}
+taylor_albums %>% 
+  arrange(desc(metacritic_score)) %>% 
+  select(album_name, metacritic_score)
+```
+
+# Data Visualization
+Instead of just having a list it would be better to plot it, in order to visualize the results.
+We do this by using the 'ggplot()' function
+
+```{r}
+taylor_albums %>% 
+  ggplot(aes(x = metacritic_score, y = album_name))+
+  geom_col()
+```
+
+However, the plot above has two colums without any data: 'The Taylor Swift Holiday Collection' and "Beautiful Eyes". This is because these to albums do not have any data assigned to them in the dataset. To exclude them from the plot we will use the 'drop_na()' function
+```{r}
+taylor_albums %>% 
+  drop_na(metacritic_score) %>% 
+  ggplot(aes(x = metacritic_score, y = album_name))+
+  geom_col()
+```
+Now that we have a plot without any missing values it might be better to arrange the values after metacritic score and not by the name of the album. To do this we use the 'reorder()' function within the 'ggplot()' function.
+
+```{r}
+taylor_albums %>% 
+  drop_na(metacritic_score) %>%
+  ggplot(aes(x = metacritic_score, reorder(album_name, metacritic_score)))+
+           geom_col()
+```
+Now this is a great and informative plot, but i would be fun to add some color to it! To do this we add the 'fill()' function. Furthermore, it might be even more informative to add our own title to the plot. This is done with the 'labs()' function.
+
+```{r}
+taylor_albums %>% 
+   drop_na(metacritic_score) %>%
+  ggplot(aes(x = metacritic_score, y = reorder(album_name, metacritic_score), fill = album_name))+
+  geom_col()+
+  labs(title = "Metacritic score", x = "Score", y = "Album")
+```
+
+This is a bit more aesthetically pleasing, but the 'taylor' package actually includes color pallets arranged by the color scheme of the album. This function is called 'scale_fill_albums()'
+```{r}
+taylor_albums %>% 
+   drop_na(metacritic_score) %>%
+  ggplot(aes(x = metacritic_score, y = reorder(album_name, metacritic_score), fill = album_name))+
+  geom_col()+
+  labs(title = "Metacritic score", x = "Score", y = "Album")+
+  scale_fill_albums()
+```
+
+Now you've learned to visualize simple data from the datasets, and arrange the information nicely in a plot. Therefore, we will move on to the text-mining portion of the workshop.
+
+
+
+
+#Text mining 
+Text mining is a term that covers a large variety of approaches and concrete methods. In this example we will use the tidytext approach, which is presented in the book [Text Mining with R - a tidy approach](https://www.tidytextmining.com). The method we will be employing is the term frequency. This method can be used to create little "summaries" of the songs within a corpus by extracting the words that are most significant to each song. By doing this we can create a so-called distant reading of a large data corpus. In our case the corpus is all of Taylor Swifts songs. With over 200 songs it would be cumbersome to read it all with our human eyes (close reading). Firstly, we will focus on preparing our data for the monthly analysis. 
+
+
+## Tidying the data
+The data processing will be based on the Tidy Data Principle as it is implemented in the tidytext package. The notion is to take text and break it into individual words. In this way, there will be just one word per row in the dataset. This is achieved by using the `unnest_tokens`-function:
+  
+```{r}
+taylor_all_songs %>%
+  unnest(lyrics) -> taylor_lyrics
+```
+
+```{r}
+taylor_lyrics %>%   
+  unnest_tokens(word, lyric) -> taylor_tidy
+```
+
+
+## Counting the words
+Since we now have the text from the songs on the one word pr. row-format we can count the words to see, which words are used most frequently: 
+
+
+```{r}
+taylor_tidy %>%
+  count(word) %>% 
+  arrange(-n)
+```
+The words above do not tell us much about the themes in Taylors songs, therefore it would be better to apply a lsit of stopwords. Stopword lists are a collection of words which are normally filtered from text analysis, since they to not add any meaningful information. 
+
+To add the stopwords we will use the 'anti_join()' function. R already has a stopwordlist and this is the one we will use. 
+
+
+```{r}
+taylor_tidy %>%
+  anti_join(stop_words) %>% 
+  count(word) %>% 
+  arrange(-n)
+```
+
+Now we get a more meaningful overview of Taylors most used words in her songs. A word like "you" might have been meaningful in this case, but for now we choose to filter it out. 
+
+
+# Plotting the results
+Like before, it would be better to visualize the results. Therefore we combine the functions previous functions from the data-visualizing section with the text-mining section: 
+
+```{r}
+taylor_tidy %>%
+  anti_join(stop_words) %>%
+  count(word, sort =TRUE) %>%
+  slice_max(n, n = 15) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = n)) +
+  geom_col() +
+  labs(y = NULL) +
+  scale_fill_taylor_c()
+```
+
+Because Taylor Swift has release 10 (soon 11) wonderful albums, it might be interesting to look at what the most frequently used in a specific album. In this example we will look at her newest album, by using the 'filter()' function. Furthermore, to make the colors correspond to the album we will use the 'scale_fill_taylor_c()' function.
+
+```{r}
+taylor_tidy %>%
+  filter(album_name == "Midnights") %>% 
+  anti_join(stop_words) %>%
+  count(word, sort =TRUE) %>%
+  slice_max(n, n = 15) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = n)) +
+  geom_col() +
+  scale_fill_taylor_c(album = "Midnights")
+```
+
+# Sentiment analysis 
+
+Sentiment analysis in R can be used to classify words by the emotion they express. There are multiple ways of conducting sentiment analysis, today we will look at the 'bing' and 'nrc' lexicons. 
+
+The 'bing' lexicon, made by Bing Liu and collaborators, categorizes words into positive and negative categories in a binary fashion. Whereas the 'nrc' lexicon into categories and positive, negative, anger, anticipation, disgust, fear, joy, sadness, surprise, and trust. 
+
+To learn more about sentiment analysis in R see: https://www.tidytextmining.com/sentiment 
+
+Firstly we will load the lexicons
+```{r}
+get_sentiments("bing")
+get_sentiments("nrc")
+```
+
+
+```{r}
+taylor_tidy %>%
+  right_join(get_sentiments("nrc")) %>%
+  filter(!is.na(sentiment)) %>%
+  count(sentiment, sort = TRUE) %>%  
+  ggplot(aes(x = n, y =  reorder(sentiment, n), fill = sentiment))+
+  geom_col()+
+  labs(x = "sentiment", y = "frequency")+
+  scale_fill_taylor_d()
+```
+Here we can see how all of the albums combined fall under the emotional categories. To see which albums take up the most or least space within each category, we again use the 'count()' function, but also add "album_name" to the function.
+
+```{r}
+taylor_tidy %>%
+  right_join(get_sentiments("nrc")) %>%
+  filter(!is.na(album_name)) %>%
+  filter(!album_name %in% c("The Taylor Swift Holiday Collection", "Beautiful Eyes"))%>% 
+  filter(!is.na(sentiment)) %>%
+  count(album_name, sentiment, sort = TRUE) %>%  
+  ggplot(aes(x = n, y = reorder(sentiment, n), fill = album_name)) +
+  geom_col() +
+  labs(x = "sentiment", y = "frequency")+
+  scale_fill_albums()
+```
+
+We can also just choose two albums to compare, for example her first and latest albums. This is done by using the 'filter()' function. 
+```{r}
+taylor_tidy %>%
+  right_join(get_sentiments("nrc")) %>%
+  filter(!is.na(sentiment)) %>%
+  filter(album_name %in% c("Midnights", "Taylor Swift")) %>% 
+  count(album_name, sentiment, sort = TRUE) %>%  
+  ggplot(aes(x = n, y = reorder(sentiment, n), fill = album_name)) +
+  geom_col() +
+  labs(x = "sentiment", y = "frequency")+
+  scale_fill_albums()
+```
+
+
